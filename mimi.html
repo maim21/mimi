@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Visualizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #canvas {
+            background: transparent;
+            border-radius: 20px;
+        }
+
+        #info {
+            position: absolute;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255,255,255,0.9);
+            text-align: center;
+            font-size: 16px;
+            font-weight: 300;
+            backdrop-filter: blur(10px);
+            background: rgba(255,255,255,0.1);
+            padding: 15px 30px;
+            border-radius: 25px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        #note {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            text-align: center;
+            font-size: 64px;
+            font-weight: 700;
+            text-shadow: 0 0 40px rgba(255,255,255,0.6);
+            backdrop-filter: blur(10px);
+            background: rgba(255,255,255,0.05);
+            padding: 20px 40px;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            min-width: 200px;
+        }
+
+        .btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #ff6b6b 0%, #feca57 25%, #48dbfb 50%, #ff9ff3 75%, #54a0ff 100%);
+            background-size: 300% 300%;
+            animation: gradientShift 3s ease infinite;
+            border: none;
+            padding: 25px 50px;
+            font-size: 20px;
+            font-weight: 600;
+            color: white;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255,255,255,0.2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .btn:hover {
+            transform: translate(-50%, -50%) scale(1.1);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+            border: 2px solid rgba(255,255,255,0.4);
+        }
+
+        .btn:active {
+            transform: translate(-50%, -50%) scale(0.95);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+        <button id="start-btn" class="btn">🎤 Start Voice Visualizer</button>
+        <div id="note" class="hidden">♪</div>
+        <div id="info" class="hidden">Click to start listening...</div>
+    </div>
+
+    <script>
+        class VoiceVisualizer {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.noteEl = document.getElementById('note');
+                this.infoEl = document.getElementById('info');
+                this.startBtn = document.getElementById('start-btn');
+                
+                this.audioContext = null;
+                this.analyser = null;
+                this.microphone = null;
+                this.dataArray = null;
+                this.stream = null;
+                
+                this.pitch = 0;
+                this.volume = 0;
+                this.animationId = null;
+                this.waveOffset = 0;
+                
+                // Define the volume threshold here (0 to 1, representing 0% to 100%)
+                this.volumeThreshold = 0.10; // Corresponds to 10% volume
+
+                this.setupCanvas();
+                this.setupEventListeners();
+            }
+            
+            setupCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                
+                window.addEventListener('resize', () => {
+                    this.canvas.width = window.innerWidth;
+                    this.canvas.height = window.innerHeight;
+                });
+            }
+            
+            setupEventListeners() {
+                this.startBtn.addEventListener('click', () => this.startAudio());
+            }
+            
+            async startAudio() {
+                try {
+                    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.microphone = this.audioContext.createMediaStreamSource(this.stream);
+                    
+                    this.analyser.fftSize = 2048;
+                    this.analyser.smoothingTimeConstant = 0.8;
+                    
+                    this.microphone.connect(this.analyser);
+                    
+                    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                    
+                    this.startBtn.classList.add('hidden');
+                    this.noteEl.classList.remove('hidden');
+                    this.infoEl.classList.remove('hidden');
+                    
+                    this.animate();
+                } catch (err) {
+                    console.error('Error accessing microphone:', err);
+                    this.infoEl.textContent = 'Microphone access denied';
+                    this.infoEl.classList.remove('hidden');
+                }
+            }
+            
+            getPitch() {
+                this.analyser.getByteFrequencyData(this.dataArray);
+                
+                const sum = this.dataArray.reduce((a, b) => a + b);
+                this.volume = sum / this.dataArray.length / 255; // Normalize volume to 0-1
+
+                // If volume is below threshold, reset pitch and return 0
+                if (this.volume < this.volumeThreshold) {
+                    this.pitch = 0;
+                    return 0;
+                }
+
+                let maxIndex = 0;
+                let maxValue = 0;
+                
+                for (let i = 0; i < this.dataArray.length; i++) {
+                    if (this.dataArray[i] > maxValue) {
+                        maxValue = this.dataArray[i];
+                        maxIndex = i;
+                    }
+                }
+
+                const nyquist = this.audioContext.sampleRate / 2;
+                const frequency = (maxIndex * nyquist) / this.dataArray.length;
+
+                if (maxValue > 50 && frequency > 80 && frequency < 800) {
+                    this.pitch = frequency;
+                } else {
+                    this.pitch = 0;
+                }
+                
+                return this.pitch;
+            }
+            
+            hzToNote(freq) {
+                if (freq <= 0) return "–";
+                
+                const A4 = 440;
+                const C0 = A4 * Math.pow(2, -4.75);
+                const h = Math.round(12 * Math.log2(freq / C0));
+                const octave = Math.floor(h / 12);
+                const n = h % 12;
+                const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+                
+                return `${noteNames[n]}${octave}`;
+            }
+            
+            getPitchColor(pitch) {
+                if (pitch === 0) return '#666';
+                
+                const normalized = Math.max(0, Math.min(1, (pitch - 80) / (800 - 80)));
+                const hue = (1 - normalized) * 240;
+                const saturation = 100;
+                const lightness = 50 + normalized * 30;
+                
+                return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+            }
+            
+            drawV(centerX, centerY, size, color, volume) {
+                const ctx = this.ctx;
+                const baseWidth = size;
+                const baseHeight = size * 1.2;
+                const scale = 1 + volume * 0.5;
+
+                const bottomX = centerX;
+                const bottomY = centerY + (baseHeight * scale) / 2;
+                const leftTopX = centerX - (baseWidth * scale) / 2;
+                const leftTopY = centerY - (baseHeight * scale) / 2;
+                const rightTopX = centerX + (baseWidth * scale) / 2;
+                const rightTopY = leftTopY;
+
+                ctx.beginPath();
+                ctx.lineWidth = 6 + volume * 10;
+                ctx.strokeStyle = color;
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = color;
+
+                ctx.moveTo(bottomX, bottomY);
+                ctx.lineTo(leftTopX, leftTopY);
+                ctx.moveTo(bottomX, bottomY);
+                ctx.lineTo(rightTopX, rightTopY);
+                ctx.stroke();
+
+                this.drawWaves(bottomX, bottomY, leftTopX, leftTopY, rightTopX, rightTopY, color, volume);
+            }
+            
+            drawWaves(topX, topY, leftBottomX, leftBottomY, rightBottomX, rightBottomY, color, volume) {
+                // Only draw waves if volume is above the threshold
+                if (volume < this.volumeThreshold) return; 
+
+                this.waveOffset += 0.1 + volume * 0.2;
+                
+                this.drawWaveAlongLine(topX, topY, leftBottomX, leftBottomY, color, volume);
+                this.drawWaveAlongLine(topX, topY, rightBottomX, rightBottomY, color, volume);
+            }
+            
+            drawWaveAlongLine(x1, y1, x2, y2, color, volume) {
+                const ctx = this.ctx;
+                const steps = 50;
+                
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2 + volume * 8;
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = color;
+                
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const perpX = -dy / length;
+                const perpY = dx / length;
+                
+                let firstPoint = true;
+                
+                for (let i = 0; i <= steps; i++) {
+                    const t = i / steps;
+                    const baseX = x1 + t * dx;
+                    const baseY = y1 + t * dy;
+                    
+                    const waveFrequency = 8 + this.pitch * 0.02;
+                    const wavePhase = this.waveOffset + t * Math.PI * 2 * 3;
+                    const waveAmplitude = volume * 30 * Math.sin(t * Math.PI);
+                    const displacement = Math.sin(waveFrequency * t * Math.PI * 2 + wavePhase) * waveAmplitude;
+
+                    const waveX = baseX + perpX * displacement;
+                    const waveY = baseY + perpY * displacement;
+                    
+                    if (firstPoint) {
+                        ctx.moveTo(waveX, waveY);
+                        firstPoint = false;
+                    } else {
+                        ctx.lineTo(waveX, waveY);
+                    }
+                }
+                
+                ctx.stroke();
+            }
+            
+            animate() {
+                const ctx = this.ctx;
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+                
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                ctx.fillRect(0, 0, width, height);
+
+                const pitch = this.getPitch(); // Call getPitch to update volume and pitch
+                const note = this.hzToNote(pitch);
+                const color = this.getPitchColor(pitch);
+
+                this.noteEl.textContent = this.volume > this.volumeThreshold ? `♪ ${note}` : '♪';
+                this.noteEl.style.color = color;
+                this.infoEl.textContent = this.volume > this.volumeThreshold ? 
+                    `Pitch: ${pitch.toFixed(1)} Hz | Volume: ${(this.volume * 100).toFixed(0)}%` : 
+                    'Listening... (Speak louder!)';
+
+                const centerX = width / 2;
+                const centerY = height / 2;
+                const baseSize = Math.min(width, height) * 0.3;
+                
+                // Only draw the V shape and waves if the volume is above the threshold
+                if (this.volume > this.volumeThreshold) {
+                    this.drawV(centerX, centerY, baseSize, color, this.volume);
+                } else {
+                    // Optionally, clear the canvas or draw a static, low-volume visual if needed
+                    // For now, we'll just let the transparent fill clear it slightly.
+                }
+                
+                this.animationId = requestAnimationFrame(() => this.animate());
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new VoiceVisualizer();
+        });
+    </script>
+</body>
+</html>
