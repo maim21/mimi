@@ -190,7 +190,7 @@
                 this.analyser.getByteFrequencyData(this.dataArray);
                 
                 const sum = this.dataArray.reduce((a, b) => a + b);
-                this.volume = sum / this.dataArray.length / 255; // Normalize volume to 0-1
+                this.volume = sum / this.dataArray.length / 255; 
 
                 // If volume is below threshold, reset pitch and return 0
                 if (this.volume < this.volumeThreshold) {
@@ -332,7 +332,7 @@
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
                 ctx.fillRect(0, 0, width, height);
 
-                const pitch = this.getPitch(); // Call getPitch to update volume and pitch
+                const pitch = this.getPitch();
                 const note = this.hzToNote(pitch);
                 const color = this.getPitchColor(pitch);
 
